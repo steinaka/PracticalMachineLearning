@@ -1,0 +1,195 @@
+---
+title: "Untitled"
+author: "KX"
+date: "20 November 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Executive Summary
+#### GitHub Repo: <https://github.com/steinaka/PracticalMachineLearning>
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+
+### Goal
+
+The goal of this project is to predict the manner in which subjects did 
+the exercise. This is the "classe" variable in the training set. The model will
+use the other variables to predict with. This report describes:  
+1 how the model is built  
+2 use of cross validation  
+3 an estimate of expected out of sample error  
+
+# Getting and cleaning the Data
+The first step is to download the data, load it into R and prepare it for 
+the modeling process.  
+
+### Load the functions and static variables
+All functions are loaded and static variables are assigned.  Also in this 
+section, the seed is set so the pseudo-random number generator operates in a 
+consistent way for repeat-ability.  
+
+```{r warning=FALSE, message=FALSE, echo=TRUE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(e1071)
+library(randomForest)
+set.seed(1)
+train.url <-
+        "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test.url <- 
+        "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+path <- paste(getwd())
+train.file <- file.path(path, "machine-train-data.csv")
+test.file <- file.path(path, "machine-test-data.csv")
+```
+
+### Dowload the files (if necessary) and read them into memory  
+1. Files are read into memory
+2.Mssing data (i.e., "NA", "#DIV/0!" and "") are all set to NA.  
+
+```{r}
+if (!file.exists(train.file)) {
+        download.file(train.url, destfile=train.file)
+}
+if (!file.exists(test.file)) {
+        download.file(test.url, destfile=test.file)
+}
+train.data.raw <- read.csv(train.file, na.strings=c("NA","#DIV/0!",""))
+test.data.raw <- read.csv(test.file, na.strings=c("NA","#DIV/0!",""))
+```
+
+
+
+### Remove unecessary colums
+Only Columns required for the project is used
+
+```{r}
+# Drop the first 7 columns as they're unnecessary for predicting.
+train.data.clean1 <- train.data.raw[,8:length(colnames(train.data.raw))]
+test.data.clean1 <- test.data.raw[,8:length(colnames(test.data.raw))]
+# Drop colums with NAs
+train.data.clean1 <- train.data.clean1[, colSums(is.na(train.data.clean1)) == 0] 
+test.data.clean1 <- test.data.clean1[, colSums(is.na(test.data.clean1)) == 0] 
+# Check for near zero variance predictors and drop them if necessary
+nzv <- nearZeroVar(train.data.clean1,saveMetrics=TRUE)
+zero.var.ind <- sum(nzv$nzv)
+if ((zero.var.ind>0)) {
+        train.data.clean1 <- train.data.clean1[,nzv$nzv==FALSE]
+}
+```
+
+### Slice the data for cross validation  
+A training set using 70% of the data which is used to train the model.
+A second  set is a validation used to assess model performance.  
+
+```{r}
+in.training <- createDataPartition(train.data.clean1$classe, p=0.70, list=F)
+train.data.final <- train.data.clean1[in.training, ]
+validate.data.final <- train.data.clean1[-in.training, ]
+```
+
+
+
+
+# Model Development  
+### Train the model  
+The training data-set is used to fit a Random Forest model because it automatically selects important variables and is robust to correlated 
+covariates & outliers in general. 5-fold cross validation is used when applying the algorithm. 
+A Random Forest algorithm is a way of averaging 
+multiple deep decision trees, trained on different parts of the same data-set, with the goal of reducing the variance. This typically produces better performance at the expense of bias and interpret-ability. 
+The Cross-validation technique assesses how the results of a statistical analysis will generalize to an independent data set. In 5-fold cross-validation, the original sample is randomly partitioned into 5 equal sized sub-samples. a single sample is retained for validation and the other sub-samples are used as training 
+data. 
+The process is repeated 5 times and the results from the folds are averaged.
+
+```{r cache=TRUE}
+control.parms <- trainControl(method="cv", 5)
+rf.model <- train(classe ~ ., data=train.data.final, method="rf",
+                 trControl=control.parms, ntree=251)
+rf.model
+```
+
+### Estimate performance  
+The model fit using the training data is tested against the validation data.
+Predicted values for the validation data are then compared to the actual 
+values.   
+
+```{r}
+rf.predict <- predict(rf.model, validate.data.final)
+confusionMatrix(validate.data.final$classe, rf.predict)
+accuracy <- postResample(rf.predict, validate.data.final$classe)
+acc.out <- accuracy[1]
+overall.ose <- 
+        1 - as.numeric(confusionMatrix(validate.data.final$classe, rf.predict)
+                       $overall[1])
+```
+
+### Results  
+The accuracy of this model is **`r acc.out`** and the Overall Out-of-Sample 
+error is **`r overall.ose`**.
+
+# Run the model
+The model is applied to the test data to produce the results.
+
+```{r}
+results <- predict(rf.model, 
+                   test.data.clean1[, -length(names(test.data.clean1))])
+results
+```
+
+
+# Appendix - Decision Tree Visualization
+
+
+```{r warning=FALSE}
+plot(train.data.final$classe, col="green", main="Bar Plot of levels of the variable classe within the subTraining data set", xlab="classe levels", ylab="Frequency")
+```
+
+
+```{r warning=FALSE}
+treeModel <- rpart(classe ~ ., data=train.data.final, method="class")
+fancyRpartPlot(treeModel)
+```
+
+
+```{r warning=FALSE}
+model1 <- rpart(classe ~ ., train.data.final, method="class")
+
+# Predicting:
+prediction1 <- predict(model1, validate.data.final, type = "class")
+
+# Plot of the Decision Tree
+rpart.plot(model1, main="Classification Tree", extra=102, under=TRUE, faclen=0)
+```
+
+
+```{r warning=FALSE}
+confusionMatrix(prediction1, validate.data.final$classe)
+```
+
+
+#References
+[1] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human ’13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+[2] Krzysztof Gra??bczewski and Norbert Jankowski. Feature Selection with Decision Tree Criterion.
